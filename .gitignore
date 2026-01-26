@@ -50,9 +50,9 @@ checkpoints/
 # Tokenizer files
 *.json
 
-# Data
-data/
-datasets/
+# Data (but allow tiny_lm/data package)
+/data/
+/datasets/
 
 # Logs
 logs/

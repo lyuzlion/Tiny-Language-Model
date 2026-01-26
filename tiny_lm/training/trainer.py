@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from typing import Optional, Callable
 import os
 import json
+import math
 
 
 class Trainer:
@@ -281,7 +282,7 @@ def get_cosine_schedule_with_warmup(
         progress = float(current_step - num_warmup_steps) / float(
             max(1, num_training_steps - num_warmup_steps)
         )
-        cosine_decay = 0.5 * (1.0 + torch.cos(torch.tensor(progress * 3.141592653589793)))
+        cosine_decay = 0.5 * (1.0 + torch.cos(torch.tensor(progress * math.pi)))
         return min_lr_ratio + (1.0 - min_lr_ratio) * cosine_decay
     
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)

@@ -3,7 +3,6 @@ Byte Pair Encoding (BPE) tokenizer implementation from scratch.
 """
 from typing import List, Dict, Tuple
 from collections import Counter
-import re
 
 
 class BPETokenizer:

@@ -22,9 +22,10 @@ def main():
     parser.add_argument('--temperature', type=float, default=0.7, help="Sampling temperature")
     parser.add_argument('--top_p', type=float, default=0.9, help="Nucleus sampling top-p value")
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help="Device to run the model on")
-    parser.add_argument('--weight', default='full_sft', type=str, help="权重名称前缀（pretrain, full_sft, rlhf, reason, ppo_actor, grpo, spo）")
-    
+    parser.add_argument('--weight', default='full_sft', type=str, help="权重名称前缀（pretrain, full_sft, rlhf, reason, ppo_actor, grpo, spo）")    
     args = parser.parse_args()
+
+    setup_seed(2026)
 
     # Load the model
     model, tokenizer = init_model(args)

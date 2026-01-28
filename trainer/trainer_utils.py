@@ -1,7 +1,14 @@
-import torch.distributed as dist
+import os
+import sys
+__package__ = "trainer"
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import torch
 import random
 import numpy as np
+from transformers import AutoTokenizer
+from model.model_tinylm import TinyLMForCausalLM
+
+
 def get_model_params(model, config):
     total = sum(p.numel() for p in model.parameters()) / 1e6 # 计算模型总参数量，单位为百万
     n_routed = getattr(config, 'n_routed_experts', getattr(config, 'num_experts', 0)) # 获取路由专家数量
@@ -15,7 +22,7 @@ def get_model_params(model, config):
     else: Logger(f'Model Params: {total:.2f}M') # 输出模型参数量信息
 
 def is_main_process():
-    return not dist.is_initialized() or dist.get_rank() == 0
+    return not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
 
 def Logger(content):
     if is_main_process():
@@ -29,3 +36,45 @@ def setup_seed(seed: int):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+
+def init_distributed_mode(): # 初始化分布式训练环境,返回本地GPU编号
+    if int(os.environ.get("RANK", -1)) == -1:
+        return 0  # 非DDP模式
+
+    torch.distributed.init_process_group(backend="nccl")
+    local_rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(local_rank)
+    return local_rank
+
+def init_model(config, tokenizer_path='../model', save_dir='../out'):
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+    model = TinyLMForCausalLM(config)
+    get_model_params(model, config)
+    Logger(f'Trainable Params: {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.3f}M')
+    return model.to('cuda'), tokenizer
+
+
+def save_checkpoint(model, optimizer, scaler, epoch, step, save_dir, weight, config):
+    ckp_path = f'{save_dir}/{weight}_{config.hidden_size}_ckp.pth'
+    resume_path = f'{save_dir}/{weight}_{config.hidden_size}_resume.pth'
+
+    raw_model = model.module if isinstance(model, torch.nn.parallel.DistributedDataParallel) else model
+    raw_model = getattr(raw_model, '_orig_mod', raw_model)
+    state_dict = raw_model.state_dict()
+
+    torch.save({
+        'model_state_dict': state_dict,
+        'optimizer_state_dict': optimizer.state_dict() if optimizer is not None else None,
+        'scaler_state_dict': scaler.state_dict() if scaler is not None else None,
+        'epoch': epoch,
+        'step': step
+    }, ckp_path)
+
+    torch.save({
+        'model_state_dict': state_dict,
+        'optimizer_state_dict': optimizer.state_dict() if optimizer is not None else None,
+        'scaler_state_dict': scaler.state_dict() if scaler is not None else None,
+        'epoch': epoch,
+        'step': step
+    }, resume_path)

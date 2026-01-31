@@ -7,7 +7,7 @@ import random
 import numpy as np
 from transformers import AutoTokenizer
 from model.model_tinylm import TinyLMForCausalLM
-
+from datetime import datetime
 
 def get_model_params(model, config):
     total = sum(p.numel() for p in model.parameters()) / 1e6 # 计算模型总参数量，单位为百万
@@ -55,26 +55,31 @@ def init_model(config, tokenizer_path='../model', save_dir='../out'):
     return model.to('cuda'), tokenizer
 
 
-def save_checkpoint(model, optimizer, scaler, epoch, step, save_dir, weight, config):
-    ckp_path = f'{save_dir}/{weight}_{config.hidden_size}_ckp.pth'
-    resume_path = f'{save_dir}/{weight}_{config.hidden_size}_resume.pth'
-
+def save_checkpoint(model, optimizer, scaler, epoch, step, save_dir, method, config):
+    os.makedirs(save_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ckp_path = f'{save_dir}/{method}_{config.hidden_size}_epoch{epoch}_step{step}_{timestamp}.pth'
+    
+    # 2. Extract raw model (existing logic is good)
     raw_model = model.module if isinstance(model, torch.nn.parallel.DistributedDataParallel) else model
     raw_model = getattr(raw_model, '_orig_mod', raw_model)
-    state_dict = raw_model.state_dict()
-
-    torch.save({
-        'model_state_dict': state_dict,
+    
+    # 3. Save state dict
+    checkpoint = {
+        'model_state_dict': raw_model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict() if optimizer is not None else None,
         'scaler_state_dict': scaler.state_dict() if scaler is not None else None,
         'epoch': epoch,
-        'step': step
-    }, ckp_path)
-
-    torch.save({
-        'model_state_dict': state_dict,
-        'optimizer_state_dict': optimizer.state_dict() if optimizer is not None else None,
-        'scaler_state_dict': scaler.state_dict() if scaler is not None else None,
-        'epoch': epoch,
-        'step': step
-    }, resume_path)
+        'step': step,
+        # 4. Consider adding metadata for easier recovery
+        'config': config if hasattr(config, '__dict__') else dict(config),
+        'method': method,
+        'hidden_size': config.hidden_size
+    }
+    
+    # 5. Use torch.save with pickle protocol for compatibility
+    torch.save(checkpoint, ckp_path, pickle_protocol=4)
+    
+    # 6. Return path for potential use by caller
+    Logger(f'Checkpoint saved to {ckp_path}')
+    return ckp_path

@@ -6,13 +6,15 @@ import warnings
 warnings.filterwarnings('ignore')
 
 import argparse
-from trainer.trainer_utils import get_lr, Logger, is_main_process, lm_checkpoint, init_distributed_mode, setup_seed, init_model
+from trainer.trainer_utils import get_lr, Logger, is_main_process, save_checkpoint, init_distributed_mode, setup_seed, init_model
 import torch
 from dataset.dataset import PretrainDataset
 from torch.utils.data import DataLoader, DistributedSampler
 from torch import optim
 from torch.nn.parallel import DistributedDataParallel
 import tqdm
+from model.model_tinylm import TinyLMConfig
+
 def main():
     parser = argparse.ArgumentParser(description="Tiny Language Model Pretraining")
     parser.add_argument('--output_dir', type=str, default='./checkpoints', help='Directory to save checkpoints')
@@ -87,8 +89,10 @@ def main():
 
             if (step + 1) % args.save_interval == 0:
                 # Save checkpoint
-                save_checkpoint(config, weight='pretrain', model=model, optimizer=optimizer, epoch=epoch, step=step, save_dir=args.output_dir)
+                save_checkpoint(model=model, optimizer=optimizer, scaler=scaler, epoch=epoch, step=step, save_dir=args.output_dir, method='pretrain', config=config)
     
     if torch.distributed.is_initialized(): torch.distributed.destroy_process_group()
+
+
 if __name__ == '__main__':
     main()

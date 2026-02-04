@@ -40,14 +40,14 @@ def setup_seed(seed: int):
 
 def init_distributed_mode(): # 初始化分布式训练环境,返回本地GPU编号
     if int(os.environ.get("RANK", -1)) == -1:
-        return 0  # 非DDP模式
+        return 0
 
     torch.distributed.init_process_group(backend="nccl")
     local_rank = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(local_rank)
     return local_rank
 
-def init_model(config, tokenizer_path='../model', save_dir='../out'):
+def init_model(config, tokenizer_path='../tokenizer'):
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
     model = TinyLMForCausalLM(config)
     get_model_params(model, config)

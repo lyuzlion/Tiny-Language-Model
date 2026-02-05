@@ -52,7 +52,7 @@ def init_model(config, tokenizer_path='../tokenizer'):
     model = TinyLMForCausalLM(config)
     get_model_params(model, config)
     Logger(f'Trainable Params: {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.3f}M')
-    return model.to('cuda'), tokenizer
+    return model, tokenizer
 
 
 def save_checkpoint(model, optimizer, scaler, epoch, step, save_dir, method, config):

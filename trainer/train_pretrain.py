@@ -19,7 +19,7 @@ def main():
     parser.add_argument('--output_dir', type=str, default='/home/liuzilong/data/models/Tiny-Language-Model/pretrain/', help='Directory to save checkpoints and models')
     parser.add_argument('--data_path', type=str, default='/home/liuzilong/data/datasets/pretrain_hq.jsonl', help='Path to the training data')
     parser.add_argument('--tokenizer_path', type=str, default='/home/liuzilong/Tiny-Language-Model/tokenizer', help='Path to the tokenizer')
-    parser.add_argument('--epochs', type=int, default=1, help='Number of training epochs')
+    parser.add_argument('--epochs', type=int, default=2, help='Number of training epochs')
     parser.add_argument('--batch_size', type=int, default=64, help='Training batch size per GPU')
     parser.add_argument('--learning_rate', type=float, default=5e-4, help='Initial learning rate')
     parser.add_argument('--dtype', type=str, default='bfloat16', help='Data type for mixed precision training')

@@ -92,6 +92,7 @@ Tiny-Language-Model/
 │   ├── trainer_pretrain.py     # Pre-training script
 │   ├── trainer_full_sft.py     # Supervised Fine-Tuning script
 │   └── trainer_utils.py        # Training helper functions
+├── inference.py                # Inference script
 ├── requirements.txt            # Python dependencies
 └── README.md                   # Project documentation
 ```

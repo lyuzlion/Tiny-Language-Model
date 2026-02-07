@@ -92,7 +92,7 @@ def main():
                 Logger(f"Epoch [{epoch+1}/{args.epochs}], Step [{step+1}], Loss: {avg_loss:.4f}")
                 running_loss = 0.0
         if torch.distributed.get_rank() == 0:
-            save_checkpoint(model=model, epoch=epoch, save_dir=os.path.join(args.output_dir, 'checkpoints'), method='pretrain', config=config)
+            save_checkpoint(model=model, epoch=epoch, save_dir=args.output_dir, method='pretrain', config=config)
 
     torch.distributed.destroy_process_group()
 

@@ -29,7 +29,7 @@ def main():
     parser.add_argument('--num_hidden_layers', type=int, default=16, help="Number of hidden layers")
     parser.add_argument('--max_new_tokens', type=int, default=340, help="Maximum number of new tokens to generate")
     parser.add_argument('--temperature', type=float, default=0.1, help="Sampling temperature")
-    parser.add_argument('--top_p', type=float, default=0.9, help="Nucleus sampling top-p value")
+    parser.add_argument('--top_p', type=float, default=0.8, help="Nucleus sampling top-p value")
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help="Device to run the model on")
     parser.add_argument('--weight', default='pretrain', type=str, help="权重名称前缀（pretrain, full_sft, rlhf, reason, ppo_actor, grpo, spo）")    
     args = parser.parse_args()

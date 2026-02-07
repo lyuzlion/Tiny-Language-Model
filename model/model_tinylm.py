@@ -62,20 +62,19 @@ class RMSNorm(nn.Module):
         self.weight = nn.Parameter(torch.ones(hidden_size))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        norm_x = torch.mean(x.pow(2), dim=-1, keepdim=True)
-        x_normed = x * torch.rsqrt(norm_x + self.eps)
-        return self.weight * x_normed
+        # Use float() for variance calculation to avoid overflow in half-precision
+        dtype = x.dtype
+        x = x.float()
+        variance = x.pow(2).mean(-1, keepdim=True)
+        x = x * torch.rsqrt(variance + self.eps)
+        return (x * self.weight).to(dtype)
 
-def rotate_half(x):
-    """Rotates half the hidden dims of the input."""
-    x1 = x[..., : x.shape[-1] // 2]
-    x2 = x[..., x.shape[-1] // 2 :]
-    return torch.cat((-x2, x1), dim=-1)
+def apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=1):
+    def rotate_half(x):
+        return torch.cat((-x[..., x.shape[-1] // 2:], x[..., : x.shape[-1] // 2]), dim=-1)
 
-def apply_rotary_pos_emb(q, k, cos, sin):
-    # SDPA expects [bsz, heads, seq_len, head_dim], logic adjusted for that
-    q_embed = (q * cos) + (rotate_half(q) * sin)
-    k_embed = (k * cos) + (rotate_half(k) * sin)
+    q_embed = (q * cos.unsqueeze(unsqueeze_dim)) + (rotate_half(q) * sin.unsqueeze(unsqueeze_dim))
+    k_embed = (k * cos.unsqueeze(unsqueeze_dim)) + (rotate_half(k) * sin.unsqueeze(unsqueeze_dim))
     return q_embed, k_embed
 
 
@@ -113,32 +112,46 @@ class GroupQueryAttention(nn.Module):
                 attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         bsz, seq_len, _ = hidden_states.size()
 
-        query_states = self.q_proj(hidden_states).view(bsz, seq_len, self.num_query_heads, self.head_dim).transpose(1, 2)
-        key_states = self.k_proj(hidden_states).view(bsz, seq_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
-        value_states = self.v_proj(hidden_states).view(bsz, seq_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
+        query_states = self.q_proj(hidden_states)
+        key_states = self.k_proj(hidden_states)
+        value_states = self.v_proj(hidden_states)
+        query_states = query_states.view(bsz, seq_len, self.num_query_heads, self.head_dim)
+        key_states = key_states.view(bsz, seq_len, self.num_kv_heads, self.head_dim)
+        value_states = value_states.view(bsz, seq_len, self.num_kv_heads, self.head_dim)
 
         cos, sin = position_embeddings
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
         if past_key_value is not None:
-            key_states = torch.cat([past_key_value[0], key_states], dim=2)
-            value_states = torch.cat([past_key_value[1], value_states], dim=2)
-
+            key_states = torch.cat([past_key_value[0], key_states], dim=1)
+            value_states = torch.cat([past_key_value[1], value_states], dim=1)
         past_kv = (key_states, value_states) if use_cache else None
 
-        key_states = key_states.repeat_interleave(self.num_query_heads // self.num_kv_heads, dim=1)
-        value_states = value_states.repeat_interleave(self.num_query_heads // self.num_kv_heads, dim=1)
+        query_states = query_states.transpose(1, 2) # [bsz, num_query_heads, seq_len, head_dim]
+        key_states = repeat_kv(key_states, self.num_query_heads // self.num_kv_heads).transpose(1, 2) # [bsz, num_query_heads, seq_len, head_dim]
+        value_states = repeat_kv(value_states, self.num_query_heads // self.num_kv_heads).transpose(1, 2) # [bsz, num_query_heads, seq_len, head_dim]
 
-        output = F.scaled_dot_product_attention(
-                        query_states, 
-                        key_states, 
-                        value_states, 
-                        dropout_p=self.dropout_p if self.training else 0.0, 
-                        is_causal=True if attention_mask is None and seq_len > 1 else False
-                )
+        if seq_len > 1 and (past_key_value is None) and (attention_mask is None or torch.all(attention_mask == 1)):
+            output = F.scaled_dot_product_attention(query_states, 
+                                                key_states, 
+                                                value_states, 
+                                                dropout_p=self.dropout_p if self.training else 0.0, 
+                                                is_causal=True) # Here we add a causal mask
+        else:
+            scores = (query_states @ key_states.transpose(-2, -1)) / math.sqrt(self.head_dim)
+            scores[:, :, :, -seq_len:] += torch.triu(torch.full((seq_len, seq_len), float("-inf"), device=scores.device), diagonal=1)
+
+            if attention_mask is not None:
+                extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+                extended_attention_mask = (1.0 - extended_attention_mask) * -1e9
+                scores = scores + extended_attention_mask
+
+            scores = F.softmax(scores.float(), dim=-1).type_as(query_states)
+            output = scores @ value_states
             
-        attn_output = output.transpose(1, 2).contiguous().view(bsz, seq_len, self.hidden_size)
-        return self.out_proj(attn_output), past_kv
+        output = output.transpose(1, 2).contiguous().view(bsz, seq_len, self.hidden_size)
+        output = self.out_proj(output)
+        return output, past_kv
 
 
 class SwiGLU(nn.Module):
@@ -149,10 +162,11 @@ class SwiGLU(nn.Module):
         self.gate_proj = nn.Linear(config.hidden_size, config.intermediate_size, bias=False)
         self.down_proj = nn.Linear(config.intermediate_size, config.hidden_size, bias=False)
         self.up_proj = nn.Linear(config.hidden_size, config.intermediate_size, bias=False)
+        self.dropout = nn.Dropout(config.dropout_p)
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(self, x):
-        return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
+        return self.dropout(self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x)))
 
 
 class TinyLMLayer(nn.Module):

@@ -25,8 +25,8 @@ def main():
     parser.add_argument('--model_weight_type', type=str, default='pytorch', help="Type of the Tiny Language Model weights")
     parser.add_argument('--model_path', type=str, required=True, help="Path to the Tiny Language Model")
     parser.add_argument('--tokenizer_path', type=str, default='/home/liuzilong/Tiny-Language-Model/tokenizer', help="Path to the tokenizer")
-    parser.add_argument('--hidden_size', type=int, default=512, help="Hidden layer size")
-    parser.add_argument('--num_hidden_layers', type=int, default=8, help="Number of hidden layers")
+    parser.add_argument('--hidden_size', type=int, default=768, help="Hidden layer size")
+    parser.add_argument('--num_hidden_layers', type=int, default=16, help="Number of hidden layers")
     parser.add_argument('--max_new_tokens', type=int, default=340, help="Maximum number of new tokens to generate")
     parser.add_argument('--temperature', type=float, default=0.1, help="Sampling temperature")
     parser.add_argument('--top_p', type=float, default=0.9, help="Nucleus sampling top-p value")
@@ -64,9 +64,9 @@ def main():
             streamer=streamer,
             pad_token_id=tokenizer.pad_token_id, 
             eos_token_id=tokenizer.eos_token_id,
-            # num_beams=1,
-            top_p=args.top_p, 
-            temperature=args.temperature, 
+            num_beams=1,
+            # top_p=args.top_p, 
+            # temperature=args.temperature, 
             repetition_penalty=1.2
         )
         response= tokenizer.decode(generated_ids[0][len(input_ids['input_ids'][0]):], skip_special_tokens=True) # 只是decode并保存到conversation中，并没有print

@@ -47,7 +47,7 @@ def main():
 
 
         if user_input.lower() in ['exit', 'quit']:
-            break
+            exit(0)
         conversation.append({'role': 'user', 'content': user_input})
 
         templates = {'conversation': conversation, 'tokenize': False, 'add_generation_prompt': True}

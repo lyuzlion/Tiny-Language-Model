@@ -57,66 +57,26 @@ pip install -r requirements.txt
 
 ## Quick Start
 
-### Training a Model
+### Pretraining a Model
 
-```python
-import torch
-from torch.utils.data import DataLoader
-from tiny_lm.model.transformer import TransformerLM
-from tiny_lm.tokenizer.char_tokenizer import CharTokenizer
-from tiny_lm.data.dataset import TextDataset, collate_fn
-from tiny_lm.training.trainer import Trainer
-
-# Prepare your training data
-train_texts = [
-    "The quick brown fox jumps over the lazy dog.",
-    "Machine learning is fascinating.",
-    # Add more texts...
-]
-
-# Build tokenizer vocabulary
-tokenizer = CharTokenizer()
-tokenizer.build_vocab(train_texts)
-
-# Create dataset and dataloader
-train_dataset = TextDataset(train_texts, tokenizer, max_length=128)
-train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, collate_fn=collate_fn)
-
-# Initialize model
-model = TransformerLM(
-    vocab_size=tokenizer.get_vocab_size(),
-    d_model=256,
-    num_layers=4,
-    num_heads=4,
-    d_ff=1024,
-    max_seq_len=128,
-)
-
-# Train the model
-trainer = Trainer(
-    model=model,
-    train_dataloader=train_dataloader,
-    output_dir="./outputs",
-)
-trainer.train(num_epochs=10)
+```bash
+cd ./trainer
+torchrun --nproc_per_node=4 train_pretrain.py
 ```
 
-### Generating Text
 
-```python
-from tiny_lm.generation.generator import Generator
+### Full SFT
+```bash
+cd ./trainer
+torchrun --nproc_per_node=4 train_full_sft.py --model_path /home/liuzilong/data/models/Tiny-Language-Model/pretrain/pretrain_768_epoch2.pth
+```
 
-# Initialize generator
-generator = Generator(model, tokenizer, device="cuda")
+### Inference
 
-# Generate text
-generated_text = generator.generate_sampling(
-    prompt="Machine learning",
-    max_new_tokens=50,
-    temperature=0.8,
-    top_k=10,
-)
-print(generated_text)
+```bash
+python inference.py --model_path /home/liuzilong/data/models/Tiny-Language-Model/pretrain/pretrain_768_epoch2.pth --weight pretrain
+
+python inference.py --model_path /home/liuzilong/data/models/Tiny-Language-Model/full_sft/full_sft_768_epoch1.pth --weight full_sft
 ```
 
 ## Architecture

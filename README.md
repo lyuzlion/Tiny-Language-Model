@@ -1,22 +1,18 @@
 # Tiny Language Model 🚀
 
-Train small language models entirely from scratch using native PyTorch!
+Train tiny language models entirely from scratch using native PyTorch!
 
 ## Overview
 
-This open-source project provides a complete implementation for training small language models from the ground up. **All core algorithmic code has been rebuilt from scratch using native PyTorch**, with **no reliance on abstract interfaces provided by third-party libraries**. This represents not only a full-stage open-source recreation of large language models but also serves as an **introductory tutorial to LLM development**.
+This open-source project provides a complete implementation for training tiny language models from the ground up. **Most core algorithmic code has been rebuilt from scratch using native PyTorch**. This represents not only a full-stage open-source recreation of large language models but also serves as an **introductory tutorial to LLM development**.
 
 ### Key Features
 
 ✨ **Pure PyTorch Implementation**: Every component is built from scratch using native PyTorch
 - Multi-head attention mechanism
-- Transformer blocks with layer normalization
-- Positional encodings (sinusoidal and learned)
+- Transformer blocks with RMSNorm
+- Positional encodings (RoPE)
 - Custom training loop and optimization
-
-🔤 **Built-in Tokenizers**: Two tokenization methods implemented from scratch
-- Character-level tokenizer
-- Byte Pair Encoding (BPE) tokenizer
 
 📚 **Complete Training Pipeline**:
 - Data loading and preprocessing
@@ -24,32 +20,18 @@ This open-source project provides a complete implementation for training small l
 - Checkpointing and model saving
 - Evaluation loop
 
-🎯 **Advanced Text Generation**:
-- Greedy decoding
-- Temperature-based sampling
-- Top-k sampling
-- Top-p (nucleus) sampling
-- Beam search
-
 📖 **Educational**: Extensively documented code suitable for learning
 
 ## Installation
 
 ### Requirements
 
-- Python 3.8+
-- PyTorch 2.0+
-- NumPy
+- Python 3.10
+- PyTorch 2.6.0
+- transformers 4.57.1
+- NumPy 1.26.4
 
-### Install from source
-
-```bash
-git clone https://github.com/lyuzlion/Tiny-Language-Model.git
-cd Tiny-Language-Model
-pip install -e .
-```
-
-Or install dependencies directly:
+### Install dependencies
 
 ```bash
 pip install -r requirements.txt
@@ -88,85 +70,41 @@ The model implements a decoder-only transformer architecture:
 - **Token Embeddings**: Maps input tokens to dense vectors
 - **Positional Encodings**: Adds position information (sinusoidal or learned)
 - **Transformer Blocks**: Multiple layers of:
-  - Multi-head self-attention
-  - Position-wise feedforward networks
-  - Layer normalization
+  - Grouped query attention
+  - SwiGLU feedforward networks
+  - RMS normalization
   - Residual connections
 - **Language Model Head**: Projects to vocabulary logits
 
-### Model Components
-
-```python
-TransformerLM(
-    vocab_size=1000,        # Vocabulary size
-    d_model=512,            # Model dimension
-    num_layers=6,           # Number of transformer layers
-    num_heads=8,            # Number of attention heads
-    d_ff=2048,              # Feedforward dimension
-    max_seq_len=512,        # Maximum sequence length
-    dropout=0.1,            # Dropout rate
-    positional_encoding="sinusoidal"  # or "learned"
-)
-```
-
-## Examples
-
-The `examples/` directory contains complete scripts demonstrating various use cases:
-
-- **`train_example.py`**: Complete training pipeline
-- **`inference_example.py`**: Text generation with different strategies
-- **`bpe_example.py`**: BPE tokenizer training and usage
-
-Run examples:
-
-```bash
-# Train a model
-python examples/train_example.py
-
-# Generate text (after training)
-python examples/inference_example.py
-
-# Test BPE tokenizer
-python examples/bpe_example.py
-```
 
 ## Project Structure
 
 ```
 Tiny-Language-Model/
-├── tiny_lm/                    # Main package
-│   ├── model/                  # Model components
-│   │   ├── attention.py        # Multi-head attention
-│   │   ├── feedforward.py      # Feedforward networks
-│   │   ├── positional.py       # Positional encodings
-│   │   └── transformer.py      # Complete transformer model
-│   ├── tokenizer/              # Tokenization
-│   │   ├── char_tokenizer.py   # Character-level tokenizer
-│   │   └── bpe_tokenizer.py    # BPE tokenizer
-│   ├── data/                   # Data utilities
-│   │   └── dataset.py          # Dataset classes
-│   ├── training/               # Training infrastructure
-│   │   └── trainer.py          # Trainer class
-│   └── generation/             # Text generation
-│       └── generator.py        # Generation strategies
-├── examples/                   # Example scripts
-│   ├── train_example.py
-│   ├── inference_example.py
-│   └── bpe_example.py
-├── requirements.txt            # Dependencies
-├── setup.py                    # Package setup
-└── README.md                   # This file
+├── model/                      # Model architecture implementation
+│   └── model_tinylm.py         # Tiny Language Model neural network
+├── tokenizer/                  # Tokenization utilities
+│   ├── tokenizer_config.json   # Tokenizer configuration file
+│   └── tokenizer.json          # Tokenizer vocabulary and rules
+├── dataset/                    # Data handling utilities
+│   └── dataset.py              # Dataset loading and preprocessing
+├── trainer/                    # Training utilities
+│   ├── trainer_pretrain.py     # Pre-training script
+│   ├── trainer_full_sft.py     # Supervised Fine-Tuning script
+│   └── trainer_utils.py        # Training helper functions
+├── requirements.txt            # Python dependencies
+└── README.md                   # Project documentation
 ```
 
 ## Key Concepts
 
-### 1. Multi-Head Attention
+### 1. Grouped Query Attention
 
-The attention mechanism allows the model to focus on different parts of the input sequence. Multi-head attention runs multiple attention operations in parallel, enabling the model to capture various types of relationships.
+GQA is an attention mechanism that bridges the gap between Multi-Head Attention (MHA) and Multi-Query Attention (MQA). It provides a balance between model quality and inference efficiency by grouping multiple query heads to share the same key and value heads.
 
-### 2. Positional Encoding
+### 2. Rotary Positional Encoding
 
-Since transformers don't inherently understand sequence order, positional encodings add position information to the input embeddings.
+RoPE is a positional encoding method that encodes absolute positional information using rotation matrices, allowing the model to naturally capture relative positional relationships through the attention mechanism.
 
 ### 3. Causal Masking
 
@@ -190,18 +128,17 @@ Common hyperparameter ranges:
 
 - **Learning rate**: 1e-4 to 5e-4
 - **Batch size**: 8 to 64 (depending on GPU memory)
-- **Model dimension**: 128 to 1024
-- **Number of layers**: 2 to 12
-- **Number of heads**: 4 to 16
-- **Dropout**: 0.1 to 0.3
+- **Model dimension**: 512 or 768
+- **Number of layers**: 8 or 16
+- **Number of heads**: 8
+- **Dropout**: 0
 
 ## Performance
 
 The model size and training speed depend on your hardware:
 
-- **Small model** (256 dim, 4 layers): ~5M parameters, trains on CPU
-- **Medium model** (512 dim, 6 layers): ~25M parameters, GPU recommended
-- **Large model** (768 dim, 12 layers): ~85M parameters, GPU required
+- **Small model** (512 dim, 8 layers): ~25M parameters, GPU required
+- **Large model** (768 dim, 16 layers): ~104M parameters, GPU required
 
 ## Contributing
 

@@ -61,7 +61,7 @@ def get_lr(current_step, total_steps, lr):
 
 def save_checkpoint(model, epoch, save_dir, method, config):
     os.makedirs(save_dir, exist_ok=True)
-    ckp_path = f'{save_dir}/{method}_{config.hidden_size}_epoch{epoch}.pth'
+    ckp_path = os.path.join(save_dir, f'{method}_{config.hidden_size}_epoch{epoch}.pth')
     raw_model = model.module if hasattr(model, 'module') else model
     raw_model = getattr(raw_model, '_orig_mod', raw_model)
     torch.save(raw_model.state_dict(), ckp_path)

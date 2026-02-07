@@ -53,12 +53,26 @@ cd ./trainer
 torchrun --nproc_per_node=4 train_full_sft.py --model_path /home/liuzilong/data/models/Tiny-Language-Model/pretrain/pretrain_768_epoch2.pth
 ```
 
+### LoRA Fine-Tuning
+```bash
+torchrun --nproc_per_node=4 train_lora.py --model_path /home/liuzilong/data/models/Tiny-Language-Model/full_sft/full_sft_768_epoch1.pth
+```
+
+### DPO
+```bash
+torchrun --nproc_per_node=4 train_dpo.py --model_path /home/liuzilong/data/models/Tiny-Language-Model/full_sft/full_sft_768_epoch1.pth
+```
+
+
 ### Inference
 
 ```bash
 python inference.py --model_path /home/liuzilong/data/models/Tiny-Language-Model/pretrain/pretrain_768_epoch2.pth --weight pretrain
 
 python inference.py --model_path /home/liuzilong/data/models/Tiny-Language-Model/full_sft/full_sft_768_epoch1.pth --weight full_sft
+
+python inference.py --model_path /home/liuzilong/data/models/Tiny-Language-Model/dpo/dpo_768_epoch0.pth --weight dpo
+
 ```
 
 ## Architecture

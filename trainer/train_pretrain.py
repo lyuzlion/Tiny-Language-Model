@@ -29,8 +29,6 @@ def main():
     parser.add_argument('--hidden_size', default=768, type=int, help="Hidden layer dimension")
     parser.add_argument('--num_hidden_layers', default=16, type=int, help="Number of hidden layers")
     parser.add_argument('--max_seq_len', default=340, type=int, help="Maximum training sequence length (Chinese 1 token ≈ 1.5~1.7 characters)")
-    parser.add_argument('--rope_theta', default=1000000, type=int, help="Base frequency for RoPE")
-    parser.add_argument('--inference_rope_scaling', default=False, type=bool, help="Whether to use RoPE length scaling during inference")    
     parser.add_argument('--log_interval', type=int, default=25, help='Logging interval')
     parser.add_argument("--use_compile", default=1, type=int, choices=[0, 1], help="Whether to use torch.compile for acceleration (0=No, 1=Yes)")
     args = parser.parse_args()
@@ -43,21 +41,10 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True) # 创建输出目录
     dtype = torch.bfloat16 if args.dtype == "bfloat16" else torch.float16 # 设置数据类型
     autocast_ctx = torch.amp.autocast('cuda', dtype=dtype) # 设置混合精度上下文管理器
-    config = TinyLMConfig( # 定义模型配置
-                            bos_token_id=1,
-                            eos_token_id=2,
-                            vocab_size=6400,
-                            hidden_size=args.hidden_size, 
-                            num_hidden_layers=args.num_hidden_layers,
-                            num_attention_heads=8,
-                            num_kv_heads=2,
-                            hidden_act="silu",
-                            max_position_embeddings=32768,
-                            rms_norm_eps=1e-5,
-                            dropout_p=0.0,
-                            rope_theta=args.rope_theta,
-                            inference_rope_scaling=args.inference_rope_scaling
-                        )
+    config = TinyLMConfig(
+            hidden_size=args.hidden_size, 
+            num_hidden_layers=args.num_hidden_layers,
+        )
     device = torch.device(args.device)
     model, tokenizer = init_model(config, tokenizer_path=args.tokenizer_path) # 初始化模型和分词器
     model.to(device)

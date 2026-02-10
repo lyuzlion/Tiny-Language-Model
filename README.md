@@ -105,6 +105,8 @@ Tiny-Language-Model/
 ├── trainer/                    # Training utilities
 │   ├── trainer_pretrain.py     # Pre-training script
 │   ├── trainer_full_sft.py     # Supervised Fine-Tuning script
+│   ├── trainer_lora.py         # LoRA script
+│   ├── trainer_dpo.py          # DPO script
 │   └── trainer_utils.py        # Training helper functions
 ├── inference.py                # Inference script
 ├── requirements.txt            # Python dependencies

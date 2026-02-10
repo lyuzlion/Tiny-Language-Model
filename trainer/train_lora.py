@@ -6,7 +6,8 @@ import warnings
 warnings.filterwarnings('ignore')
 
 import argparse
-from trainer.trainer_utils import Logger, save_checkpoint, init_distributed_mode, setup_seed, get_lr, get_model_params
+from contextlib import nullcontext
+from trainer.trainer_utils import Logger, save_checkpoint, init_distributed_mode, setup_seed, get_lr, get_model_params, is_main_process
 import torch
 from dataset.dataset import SFTDataset
 from torch.utils.data import DataLoader, DistributedSampler
@@ -14,7 +15,7 @@ from torch import optim
 from torch.nn.parallel import DistributedDataParallel
 import tqdm
 from model.model_tinylm import TinyLMConfig
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoTokenizer
 from model.model_tinylm import TinyLMForCausalLM
 from model.model_lora import apply_lora, save_lora_weights, merge_and_unload_lora
 
@@ -34,28 +35,31 @@ if __name__ == "__main__":
     parser.add_argument('--data_path', type=str, default='/home/liuzilong/data/datasets/lora_identity.jsonl', help='Path to the training data')
     parser.add_argument('--model_path', type=str, required=True, help='Path to the pretrained model')
     parser.add_argument('--tokenizer_path', type=str, default='/home/liuzilong/Tiny-Language-Model/tokenizer', help='Path to the tokenizer')
-    parser.add_argument('--epochs', type=int, default=50, help='Number of training epochs')
-    parser.add_argument('--batch_size', type=int, default=32, help='Training batch size per GPU')
+    parser.add_argument('--epochs', type=int, default=20, help='Number of training epochs')
+    parser.add_argument('--batch_size', type=int, default=1, help='Training batch size per GPU')
     parser.add_argument('--learning_rate', type=float, default=1e-4, help='Initial learning rate')
     parser.add_argument('--dtype', type=str, default='bfloat16', help='Data type for mixed precision training')
     parser.add_argument('--num_workers', type=int, default=4, help='Number of data loading workers')
-    parser.add_argument('--accumulation_steps', type=int, default=8, help='Gradient accumulation steps')
+    parser.add_argument('--accumulation_steps', type=int, default=1, help='Gradient accumulation steps')
     parser.add_argument('--grad_clip', type=float, default=1.0, help='Gradient clipping value')
     parser.add_argument('--hidden_size', default=768, type=int, help="Hidden layer dimension")
     parser.add_argument('--num_hidden_layers', default=16, type=int, help="Number of hidden layers")
     parser.add_argument('--max_seq_len', default=340, type=int, help="Maximum training sequence length (Chinese 1 token ≈ 1.5~1.7 characters)")
-    parser.add_argument('--log_interval', type=int, default=25, help='Logging interval')
+    parser.add_argument('--log_interval', type=int, default=5, help='Logging interval')
     parser.add_argument("--use_compile", default=1, type=int, choices=[0, 1], help="Whether to use torch.compile for acceleration (0=No, 1=Yes)")
     args = parser.parse_args()
 
     local_rank = init_distributed_mode() # 初始化分布式训练环境,返回本地GPU编号
-    assert(torch.distributed.is_initialized())
-    args.device = f"cuda:{local_rank}" # 设置当前进程使用的GPU
-    setup_seed(42 + torch.distributed.get_rank()) # 设置随机种子
+    is_distributed = torch.distributed.is_initialized()
+    device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+    args.device = str(device)
+    rank = torch.distributed.get_rank() if is_distributed else 0
+    setup_seed(42 + rank) # 设置随机种子
 
     os.makedirs(args.output_dir, exist_ok=True) # 创建输出目录
     dtype = torch.bfloat16 if args.dtype == "bfloat16" else torch.float16 # 设置数据类型
-    autocast_ctx = torch.amp.autocast('cuda', dtype=dtype) # 设置混合精度上下文管理器
+    use_autocast = device.type == 'cuda'
+    autocast_ctx = torch.amp.autocast('cuda', dtype=dtype) if use_autocast else nullcontext() # 设置混合精度上下文管理器
     config = TinyLMConfig( # 定义模型配置
                 hidden_size=args.hidden_size, 
                 num_hidden_layers=args.num_hidden_layers,
@@ -81,22 +85,31 @@ if __name__ == "__main__":
         else:
             param.requires_grad = False
 
-    model = DistributedDataParallel(model, device_ids=[local_rank]) # 包装为DDP模型
-
-
     if args.use_compile == 1:
         model = torch.compile(model)
         Logger('torch.compile enabled')
 
+    if is_distributed:
+        model = DistributedDataParallel(model, device_ids=[local_rank]) # 包装为DDP模型
+
 
     train_set = SFTDataset(args.data_path, tokenizer, max_length=args.max_seq_len)
-    train_sampler = DistributedSampler(train_set)
-    scaler = torch.amp.GradScaler('cuda', enabled=(args.dtype == 'float16'))
+    train_sampler = DistributedSampler(train_set) if is_distributed else None
+    scaler = torch.amp.GradScaler('cuda', enabled=(use_autocast and args.dtype == 'float16'))
     optimizer = optim.AdamW(lora_params, lr=args.learning_rate)
-    dataloader = DataLoader(train_set, batch_size=args.batch_size, sampler=train_sampler, num_workers=args.num_workers, pin_memory=True)
+    dataloader = DataLoader(
+        train_set,
+        batch_size=args.batch_size,
+        sampler=train_sampler,
+        shuffle=not is_distributed,
+        num_workers=args.num_workers,
+        pin_memory=True
+    )
+    main_process = is_main_process()
     
     for epoch in range(args.epochs):
-        train_sampler.set_epoch(epoch)
+        if train_sampler is not None:
+            train_sampler.set_epoch(epoch)
         setup_seed(42 + epoch); 
         model.train()
         running_loss = 0.0
@@ -126,11 +139,16 @@ if __name__ == "__main__":
                 avg_loss = running_loss / args.log_interval
                 Logger(f"Epoch [{epoch+1}/{args.epochs}], Step [{step+1}], Loss: {avg_loss:.4f}")
                 running_loss = 0.0
-        if torch.distributed.get_rank() == 0:
+        if main_process:
             save_lora_weights(model, path = os.path.join(args.output_dir, f'lora_adapter_{config.hidden_size}_epoch{epoch}.pth'))
             # save_checkpoint(model=model, epoch=epoch, save_dir=args.output_dir, method='lora', config=config)
-    if torch.distributed.get_rank() == 0:
-        model = merge_and_unload_lora(model) # 将LoRA权重合并回基础模型并卸载LoRA结构
-        save_checkpoint(model=model, epoch=args.epochs, save_dir=args.output_dir, method='lora', config=config)
+    if main_process:
+        raw_model = model.module if hasattr(model, 'module') else model
+        raw_model = getattr(raw_model, '_orig_mod', raw_model)
+        # 先保存最终的 LoRA 适配器
+        save_lora_weights(raw_model, path=os.path.join(args.output_dir, f'lora_adapter_{config.hidden_size}_final.pth'))
+        # 合并 LoRA 权重回原模型并保存完整合并模型
+        merged_model = merge_and_unload_lora(raw_model)
+        save_checkpoint(model=merged_model, epoch=args.epochs, save_dir=args.output_dir, method='lora_merged', config=config)
     if torch.distributed.is_initialized(): 
         torch.distributed.destroy_process_group()

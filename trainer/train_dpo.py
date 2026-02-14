@@ -31,34 +31,55 @@ def init_model(args):
     get_model_params(model, model.config)
     return model, tokenizer
 
-def logits_to_log_probs(logits, labels):
-    # logits shape: (batch_size, seq_len, vocab_size)
-    # labels shape: (batch_size, seq_len)
-    # log_probs shape: (batch_size, seq_len)
-    log_probs = F.log_softmax(logits, dim=2)
-    log_probs_per_token = torch.gather(log_probs, dim=2, index=labels.unsqueeze(2)).squeeze(-1)
-    return log_probs_per_token
+def logits_to_log_probs(logits, labels, mask):
+    """
+    logits: (batch, seq_len, vocab_size)
+    labels: (batch, seq_len)
+    mask: (batch, seq_len) - 1 for tokens to include, 0 for padding/prompt
+    Returns sequence log-prob sums (log P(y|x)) per example.
+    """
+    # Shift so logits[t] scores labels[t+1]
+    shift_logits = logits[:, :-1, :].contiguous()
+    shift_labels = labels[:, 1:].contiguous()
+    shift_mask = mask[:, 1:].contiguous()
+
+    log_probs = F.log_softmax(shift_logits, dim=-1)
+    per_token_log_probs = torch.gather(log_probs, dim=2, index=shift_labels.unsqueeze(2)).squeeze(-1)
+
+    # Only sum over masked positions; mask expected to be 0/1
+    return (per_token_log_probs * shift_mask).sum(dim=1)
 
 
-def dpo_loss(ref_log_probs, policy_log_probs, mask, beta):
-    # ref_log_probs 和 policy_log_probs 都是 shape: (batch_size, seq_len)
-    # https://github.com/jingyaogong/minimind/issues/298
-    seq_lengths = mask.sum(dim=1, keepdim=True).clamp_min(1e-8)  # 防止零长度mask导致除零NaN
-    ref_log_probs = (ref_log_probs * mask).sum(dim=1) / seq_lengths.squeeze()
-    policy_log_probs = (policy_log_probs * mask).sum(dim=1) / seq_lengths.squeeze()
-
-    # 将 chosen 和 rejected 数据分开
+def dpo_loss(ref_log_probs, policy_log_probs, beta):
+    """
+    ref_log_probs: (batch_size,) - Sum of log probs from reference model
+    policy_log_probs: (batch_size,) - Sum of log probs from policy model
+    """
+    # The batch contains [chosen_1, ..., chosen_n, rejected_1, ..., rejected_n]
     batch_size = ref_log_probs.shape[0]
-    chosen_ref_log_probs = ref_log_probs[:batch_size // 2]
-    reject_ref_log_probs = ref_log_probs[batch_size // 2:]
-    chosen_policy_log_probs = policy_log_probs[:batch_size // 2]
-    reject_policy_log_probs = policy_log_probs[batch_size // 2:]
+    num_pairs = batch_size // 2
+    
+    chosen_ref = ref_log_probs[:num_pairs]
+    reject_ref = ref_log_probs[num_pairs:]
+    
+    chosen_policy = policy_log_probs[:num_pairs]
+    reject_policy = policy_log_probs[num_pairs:]
 
-    pi_logratios = chosen_policy_log_probs - reject_policy_log_probs
-    ref_logratios = chosen_ref_log_probs - reject_ref_log_probs
-    logits = pi_logratios - ref_logratios
-    loss = -F.logsigmoid(beta * logits)
-    return loss.mean()
+    # pi_logratios = log(pi(y_w|x) / pi(y_l|x))
+    policy_logratios = chosen_policy - reject_policy
+    # ref_logratios = log(ref(y_w|x) / ref(y_l|x))
+    ref_logratios = chosen_ref - reject_ref
+
+    logits = policy_logratios - ref_logratios
+    
+    # Standard DPO loss: -E[log sigmoid(beta * (log_ratio_policy - log_ratio_ref))]
+    loss = -F.logsigmoid(beta * logits).mean()
+    
+    # Optional: Calculate 'reward' metrics for logging/monitoring stability
+    chosen_rewards = beta * (chosen_policy - chosen_ref).detach()
+    reject_rewards = beta * (reject_policy - reject_ref).detach()
+    
+    return loss, chosen_rewards, reject_rewards
 
 
 
@@ -69,18 +90,18 @@ if __name__ == "__main__":
     parser.add_argument('--model_path', type=str, required=True, help='Path to the pretrained model')
     parser.add_argument('--tokenizer_path', type=str, default='/home/liuzilong/Tiny-Language-Model/tokenizer', help='Path to the tokenizer')
 
-    parser.add_argument("--epochs", type=int, default=1, help="训练轮数")
-    parser.add_argument("--batch_size", type=int, default=4, help="batch size")
-    parser.add_argument("--learning_rate", type=float, default=4e-8, help="初始学习率（建议<=5e-8避免遗忘）")
+    parser.add_argument("--epochs", type=int, default=3, help="训练轮数")
+    parser.add_argument("--batch_size", type=int, default=8, help="batch size")
+    parser.add_argument("--learning_rate", type=float, default=1e-9, help="初始学习率")
     parser.add_argument("--dtype", type=str, default="bfloat16", help="混合精度类型")
 
     parser.add_argument("--num_workers", type=int, default=8, help="数据加载线程数")
-    parser.add_argument("--accumulation_steps", type=int, default=1, help="梯度累积步数")
+    parser.add_argument("--accumulation_steps", type=int, default=8, help="梯度累积步数")
     parser.add_argument("--grad_clip", type=float, default=1.0, help="梯度裁剪阈值")
     parser.add_argument('--hidden_size', default=768, type=int, help="隐藏层维度")
     parser.add_argument('--num_hidden_layers', default=16, type=int, help="隐藏层数量")
     parser.add_argument('--max_seq_len', default=1024, type=int, help="训练的最大截断长度（中文1token≈1.5~1.7字符）")
-    parser.add_argument("--log_interval", type=int, default=100, help="日志打印间隔")
+    parser.add_argument("--log_interval", type=int, default=25, help="日志打印间隔")
     parser.add_argument("--use_compile", default=1, type=int, choices=[0, 1], help="Whether to use torch.compile for acceleration (0=No, 1=Yes)")
     
     parser.add_argument('--beta', default=0.1, type=float, help="DPO中的beta参数")
@@ -103,11 +124,10 @@ if __name__ == "__main__":
     device = torch.device(args.device)
     model, tokenizer = init_model(args) # 初始化模型和分词器
     model.to(device)
-    model = DistributedDataParallel(model, device_ids=[local_rank])
-
     if args.use_compile == 1:
         model = torch.compile(model)
         Logger('torch.compile enabled')
+    model = DistributedDataParallel(model, device_ids=[local_rank])
     Logger(f'策略模型总参数量：{sum(p.numel() for p in model.parameters()) / 1e6:.3f} M')
     # 初始化参考模型（ref_model冻结）
     ref_model, _ = init_model(args)
@@ -127,6 +147,7 @@ if __name__ == "__main__":
         model.train()
         dataloader = DataLoader(train_ds, batch_size=args.batch_size, sampler=train_sampler, num_workers=args.num_workers, pin_memory=True)
         running_loss = 0.0
+        steps_in_interval = 0
         for step, batch in enumerate(tqdm.tqdm(dataloader)):
             x_chosen = batch['x_chosen'].to(args.device)
             x_rejected = batch['x_rejected'].to(args.device)
@@ -143,17 +164,19 @@ if __name__ == "__main__":
                 param_group['lr'] = lr
 
             with autocast_ctx:
+                # 1. Forward passes
                 with torch.no_grad():
-                    ref_outputs = ref_model(x)
-                    ref_logits = ref_outputs.logits
-                ref_log_probs = logits_to_log_probs(ref_logits, y)
+                    ref_logits = ref_model(x).logits
                 
-                outputs = model(x)
-                logits = outputs.logits
-                policy_log_probs = logits_to_log_probs(logits, y)
+                policy_logits = model(x).logits
+
+                # 2. Sequence-level log probs (sum over masked positions)
+                ref_log_probs = logits_to_log_probs(ref_logits, y, mask)
+                policy_log_probs = logits_to_log_probs(policy_logits, y, mask)
+
+                # 3. DPO loss
+                loss, chosen_rewards, reject_rewards = dpo_loss(ref_log_probs, policy_log_probs, beta=args.beta)
                 
-                dpo_loss_val = dpo_loss(ref_log_probs, policy_log_probs, mask, beta=args.beta)
-                loss = dpo_loss_val
                 loss = loss / args.accumulation_steps
 
             scaler.scale(loss).backward()
@@ -166,12 +189,21 @@ if __name__ == "__main__":
                 optimizer.zero_grad(set_to_none=True)
 
             running_loss += loss.item() * args.accumulation_steps
+            steps_in_interval += 1
 
-            if step % args.log_interval == 0:
-                avg_loss = running_loss / args.log_interval
-                dpo_loss_val = dpo_loss_val.item() * args.accumulation_steps
-                Logger(f"Epoch [{epoch+1}/{args.epochs}], Step [{step+1}], Loss: {avg_loss:.4f}, DPO Loss: {dpo_loss_val:.4f}")
+            if (step + 1) % args.log_interval == 0:
+                avg_loss = running_loss / steps_in_interval
+                chosen_r = chosen_rewards.mean().item()
+                reject_r = reject_rewards.mean().item()
+                Logger(
+                    f"Epoch [{epoch+1}/{args.epochs}], Step [{step+1}], Loss: {avg_loss:.4f}, "
+                    f"Chosen Reward: {chosen_r:.4f}, Reject Reward: {reject_r:.4f}"
+                )
                 running_loss = 0.0
+                steps_in_interval = 0
+        if steps_in_interval > 0:
+            avg_loss = running_loss / steps_in_interval
+            Logger(f"Epoch [{epoch+1}/{args.epochs}], Step [{len(dataloader)}], Loss: {avg_loss:.4f}")
         if torch.distributed.get_rank() == 0:
             save_checkpoint(model=model, epoch=epoch, save_dir=args.output_dir, method='dpo', config=config)
     torch.distributed.destroy_process_group()

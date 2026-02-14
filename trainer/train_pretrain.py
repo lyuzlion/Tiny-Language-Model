@@ -6,7 +6,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 import argparse
-from trainer.trainer_utils import Logger, save_checkpoint, save_model,init_distributed_mode, setup_seed, init_model, get_lr
+from trainer.trainer_utils import Logger, save_checkpoint, init_distributed_mode, setup_seed, init_model, get_lr
 import torch
 from dataset.dataset import PretrainDataset
 from torch.utils.data import DataLoader, DistributedSampler
@@ -17,10 +17,10 @@ from model.model_tinylm import TinyLMConfig
 def main():
     parser = argparse.ArgumentParser(description="Tiny Language Model Pretraining")
     parser.add_argument('--output_dir', type=str, default='/home/liuzilong/data/models/Tiny-Language-Model/pretrain/', help='Directory to save checkpoints and models')
-    parser.add_argument('--data_path', type=str, default='/home/liuzilong/data/datasets/pretrain_hq.jsonl', help='Path to the training data')
+    parser.add_argument('--data_path', type=str, default='/home/liuzilong/data/datasets/cc_zh.0000.jsonl', help='Path to the training data')
     parser.add_argument('--tokenizer_path', type=str, default='/home/liuzilong/Tiny-Language-Model/tokenizer', help='Path to the tokenizer')
     parser.add_argument('--epochs', type=int, default=3, help='Number of training epochs')
-    parser.add_argument('--batch_size', type=int, default=64, help='Training batch size per GPU')
+    parser.add_argument('--batch_size', type=int, default=32, help='Training batch size per GPU')
     parser.add_argument('--learning_rate', type=float, default=5e-4, help='Initial learning rate')
     parser.add_argument('--dtype', type=str, default='bfloat16', help='Data type for mixed precision training')
     parser.add_argument('--num_workers', type=int, default=4, help='Number of data loading workers')
@@ -28,7 +28,7 @@ def main():
     parser.add_argument('--grad_clip', type=float, default=1.0, help='Gradient clipping value')
     parser.add_argument('--hidden_size', default=768, type=int, help="Hidden layer dimension")
     parser.add_argument('--num_hidden_layers', default=16, type=int, help="Number of hidden layers")
-    parser.add_argument('--max_seq_len', default=340, type=int, help="Maximum training sequence length (Chinese 1 token ≈ 1.5~1.7 characters)")
+    parser.add_argument('--max_seq_len', default=1024, type=int, help="Maximum training sequence length (Chinese 1 token ≈ 1.5~1.7 characters)")
     parser.add_argument('--log_interval', type=int, default=25, help='Logging interval')
     parser.add_argument("--use_compile", default=1, type=int, choices=[0, 1], help="Whether to use torch.compile for acceleration (0=No, 1=Yes)")
     args = parser.parse_args()

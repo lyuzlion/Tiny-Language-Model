@@ -1,1 +1,0 @@
-modelscope download --dataset m-a-p/Matrix cc_zh.0000.jsonl --local_dir ./

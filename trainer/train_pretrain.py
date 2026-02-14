@@ -17,7 +17,7 @@ from model.model_tinylm import TinyLMConfig
 def main():
     parser = argparse.ArgumentParser(description="Tiny Language Model Pretraining")
     parser.add_argument('--output_dir', type=str, default='/home/liuzilong/data/models/Tiny-Language-Model/pretrain/', help='Directory to save checkpoints and models')
-    parser.add_argument('--data_path', type=str, default='/home/liuzilong/data/datasets/cc_zh.0000.jsonl', help='Path to the training data')
+    parser.add_argument('--data_path', type=str, default='/home/liuzilong/data/datasets/pretrain_hq.jsonl', help='Path to the training data')
     parser.add_argument('--tokenizer_path', type=str, default='/home/liuzilong/Tiny-Language-Model/tokenizer', help='Path to the tokenizer')
     parser.add_argument('--epochs', type=int, default=3, help='Number of training epochs')
     parser.add_argument('--batch_size', type=int, default=32, help='Training batch size per GPU')
